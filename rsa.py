@@ -27,7 +27,7 @@ print(public_key == public_key2)
 
 
 message = b"encrypted data"
-ciphertext = private_key.encrypt(
+ciphertext = public_key.encrypt(
     message,
     padding.OAEP(
         mgf=padding.MGF1(algorithm=hashes.SHA256()),
@@ -37,7 +37,7 @@ ciphertext = private_key.encrypt(
 )
 
 
-plaintext = public_key.decrypt(
+plaintext = private_key.decrypt(
     ciphertext,
     padding.OAEP(
         mgf=padding.MGF1(algorithm=hashes.SHA256()),

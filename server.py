@@ -80,7 +80,7 @@ class Server:
             #print("operation", operation)
             print("room name",room_name)
             #print("payload",payload_data)
-            connection.sendall(self.server_public_key)
+
             if operation == "1":
                 user_name = payload_data["user_name"]
                 if room_name  in self.chat_room:
@@ -102,29 +102,28 @@ class Server:
                 print(self.chat_room)
 
             elif operation=="2":
-                if password == self.chat_room_password[room_name]: #passwordが合っている場合
-                    user_name = payload_data["user_name"]
-                    print("追加前",self.chat_room)
-                    if room_name not in self.chat_room:
-                        state ="2"
-                        operation_payload = "This room does not exist."
-                    else:
-                        state = "1"
-                        self.chat_room[room_name].append({str(self.token):[user_name,user_address]})
-                        operation_payload = str(self.token)
-                        self.token+=1
-                    operation_payload_size = len(operation_payload.encode())
-                    header = state.encode() + operation_payload_size.to_bytes(29,"big")
-                    connection.sendall(header)
-                    connection.sendall(operation_payload.encode())
-                    print("追加後",self.chat_room)
-                else: # passwordが違う場合
+                #passwordが合っている場合
+                user_name = payload_data["user_name"]
+                print("追加前",self.chat_room)
+                if room_name not in self.chat_room:
+                    state ="2"
+                    operation_payload = "This room does not exist."
+                elif password != self.chat_room_password[room_name]:
                     state = "2"
                     operation_payload = "Password is incorrect."
-                    operation_payload_size = len(operation_payload.encode())
-                    header = state.encode() + operation_payload_size.to_bytes(29,"big")
-                    connection.sendall(header)
-                    connection.sendall(operation_payload.encode())
+                else:
+                    state = "1"
+                    self.chat_room[room_name].append({str(self.token):[user_name,user_address]})
+                    operation_payload = str(self.token)
+                    self.token+=1
+                operation_payload_size = len(operation_payload.encode())
+                header = state.encode() + operation_payload_size.to_bytes(29,"big")
+                connection.sendall(header)
+                connection.sendall(operation_payload.encode())
+                print("追加後",self.chat_room)   
+
+            
+            connection.sendall(self.server_public_key)
 
 
     # UDPでメッセージの受信、マルチキャスト送信を行う
