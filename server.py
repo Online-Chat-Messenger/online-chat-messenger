@@ -149,7 +149,17 @@ class Server:
             body = data[header_size:]
             room_name = body[:room_name_size].decode()
             token = body[room_name_size:room_name_size+token_size].decode()
-            message = body[room_name_size+token_size:].decode()
+            message = body[room_name_size+token_size:]
+            # print(message)
+            plain_text = self.server_private_key.decrypt(
+                message,
+                padding.OAEP(
+                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                    algorithm=hashes.SHA256(),
+                    label=None
+                )
+            )
+            print(plain_text)
 
             if room_name not in self.chat_room:
                 state = "2"
@@ -159,7 +169,7 @@ class Server:
                 token_found = any(token in user for user in self.chat_room[room_name])
                 if token_found:
                     state="1"
-                    print("message",message)
+                    print("message",plain_text)
                     receivers = []
                     for participant in self.chat_room[room_name]:
                         exclude_token, user_info = next(iter(participant.items()))
@@ -168,9 +178,20 @@ class Server:
                         else:
                             receivers.append(user_info[1])
                     for receiver in receivers:
+                        # self.keysから公開鍵を入手
+                        receiver_public_key = self.key[receiver]
+                        # 公開鍵で暗号化
+                        cipher_text = receiver_public_key.encrypt(
+                            plain_text,
+                            padding.OAEP(
+                                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                                algorithm=hashes.SHA256(),
+                                label=None
+                            )
+                        )
                         #このままじゃpacket_size超える可能性ある
                         user_name_size = len(sender_name.encode())
-                        udp_socket.sendto(user_name_size.to_bytes(1,"big")+(sender_name+message).encode(),receiver)
+                        udp_socket.sendto(user_name_size.to_bytes(1,"big")+(sender_name).encode()+cipher_text,receiver)
                 else:
                     state = "2"
                     mes ="You don't have proper token probably because of timeout. First participate in the room."
