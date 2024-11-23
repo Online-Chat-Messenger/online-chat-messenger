@@ -1,6 +1,7 @@
 import socket
 import threading
 import time
+import json
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives import hashes
@@ -11,7 +12,8 @@ from cryptography.hazmat.backends import default_backend
 
 class Server:
     def __init__(self):
-        self.chat_room={} #{ room名:[ {参加者のtoken : [user name,user_address]}] , password}
+        self.chat_room={} #{ room名:[ {参加者のtoken : [user name,user_address]}]}
+        self.chat_room_password = {} #{room name : password}
         self.user_host_token = {} #host token : user name
         self.host_token= 0
         self.address=""
@@ -28,7 +30,7 @@ class Server:
         threading.Thread(target = self.handle_room).start()
         threading.Thread(target = self.handle_chat).start()
 
-    def generate_rsa_keys():
+    def generate_rsa_keys(self):
 
         private_key = rsa.generate_private_key(
             public_exponent=65537,
@@ -52,24 +54,33 @@ class Server:
         while True:
             connection,user_address = tcp_socket.accept()
             #header
-            header = connection.recv(37)
-            room_name_size = int.from_bytes(header[:1],"big")
-            operation = header[1:2].decode()
-            state = header[2:3].decode()
-            public_key_size = int.from_bytes(header[3:8],"big")
-            operation_payload_size = int.from_bytes(header[8:],"big")
-            body = connection.recv(room_name_size+public_key_size+operation_payload_size)
-            room_name = body[:room_name_size].decode()
-            public_key = body[room_name_size:room_name_size+public_key_size]
+            #header = connection.recv(32)
+            header_size = connection.recv(1)
+            print(header_size)
+            header = connection.recv(int.from_bytes(header_size,"big"))
+            print(header.decode())
+            header = json.loads(header.decode())
+            operation = header["operation"]
+            state = header["state"]
+            operation_payload_size = header["operation_payload_size"]
+            #room_name_size = int.from_bytes(header[:1],"big")
+            #operation = header[1:2].decode()
+            #state = header[2:3].decode()
+            #public_key_size = int.from_bytes(header[3:8],"big")
+            #operation_payload_size = int.from_bytes(header[3:],"big")
+            body = connection.recv(operation_payload_size)
+            #public_key = body[room_name_size:room_name_size+public_key_size]
+            operation_payload = body.decode()
+            payload_data = json.loads(operation_payload)
+            room_name = payload_data["room_name"]
+            public_key = payload_data["public_key"].encode()
             public_key = serialization.load_pem_public_key(public_key)
             self.key[user_address]=public_key
-            operation_payload = body[public_key_size+ room_name_size:].decode()
-            payload_data = json.loads(operation_payload)
             password = payload_data["password"]
-            print("operation", operation)
+            #print("operation", operation)
             print("room name",room_name)
-            print("payload",payload_data)
-
+            #print("payload",payload_data)
+            connection.sendall(self.server_public_key)
             if operation == "1":
                 user_name = payload_data["user_name"]
                 if room_name  in self.chat_room:
@@ -79,8 +90,8 @@ class Server:
                 else:
                     state = "1"
                     self.chat_room[room_name] = []
+                    self.chat_room_password[room_name] = password
                     self.chat_room[room_name].append({str(self.host_token):[user_name,user_address]})
-                    self.chat_room[room_name].append(payload_data["password"]) #追加
                     self.user_host_token[str(self.host_token)]= [user_name,user_address]
                     operation_payload = str(self.host_token)
                     self.host_token+=1
@@ -91,8 +102,8 @@ class Server:
                 print(self.chat_room)
 
             elif operation=="2":
-                if password == self.chat_room[room_name][1]: #passwordが合っている場合
-                    user_name = operation_payload
+                if password == self.chat_room_password[room_name]: #passwordが合っている場合
+                    user_name = payload_data["user_name"]
                     print("追加前",self.chat_room)
                     if room_name not in self.chat_room:
                         state ="2"

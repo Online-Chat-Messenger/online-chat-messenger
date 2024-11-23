@@ -1,6 +1,7 @@
 import socket
 import threading
 import json
+import base64
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives import hashes
@@ -40,16 +41,33 @@ def main():
             user_name = input("Enter user name: ")
             password = input("Enter password: ")
             state="0"
-            operation_payload=user_name
-            operation_payload_size=len(operation_payload.encode())
+            #operation_payload=user_name
+            
             public_key,private_key = generate_rsa_keys()
-            public_key_size = len(public_key)
-            print(public_key)
+            #public_key_size = len(public_key)
+            #print(public_key)
+            
+        
 
-            header = room_name_size.to_bytes(1,"big") + operation.encode() + state.encode() + public_key_size.to_bytes(5,"big") + operation_payload_size.to_bytes(29,"big")
-            tcp_socket.sendall(header)
-            payload = {"user_name":user_name,"password":password,"public_key":public_key.decode()}
+            payload = {"room_name":room_name,"user_name":user_name,"password":password,"public_key":public_key.decode()}
+            print(payload)
             operation_payload = json.dumps(payload)
+            operation_payload_size=len(operation_payload.encode())
+            
+            #header = room_name_size.to_bytes(1,"big") + operation.encode() + state.encode() + operation_payload_size.to_bytes(29,"big")
+            
+            header_content = {
+                "operation":operation,
+                "state":state,
+                "operation_payload_size":operation_payload_size
+            }
+            
+            header_json = json.dumps(header_content).encode()
+            
+            header_size = len(header_json)
+            header = header_size.to_bytes(1,"big") + header_json
+            
+            tcp_socket.sendall(header)
             tcp_socket.sendall(operation_payload.encode())
 
             if operation == "1":
@@ -73,6 +91,8 @@ def main():
                     continue
                 else:
                     token = operation_payload
+            server_public_key = tcp_socket.recv(4096)
+            server_public_key = serialization.load_pem_public_key(server_public_key)
             tcp_socket.close()
             send_message(room_name,token,local_port)
 
@@ -124,11 +144,11 @@ def generate_rsa_keys():
 
     public_key = private_key.public_key()
 
-    pem = public_key.public_bytes(
+    public_key_bytes = public_key.public_bytes(
     encoding=serialization.Encoding.PEM,
     format=serialization.PublicFormat.SubjectPublicKeyInfo
     )
 
-    return pem, private_key
+    return public_key_bytes, private_key
 if __name__ == "__main__":
     main()
