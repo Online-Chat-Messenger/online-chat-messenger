@@ -118,7 +118,7 @@ class Client:
 
         available_message_size=packet_size - (token_size + room_name_size)
 
-        receive_thread = threading.Thread(target=receive, args=(udp_socket,))
+        receive_thread = threading.Thread(target=self.receive, args=(udp_socket,))
         receive_thread.start()
 
         while True:

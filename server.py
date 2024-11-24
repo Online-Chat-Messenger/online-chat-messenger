@@ -163,10 +163,11 @@ class Server:
                 )
             )
 
+            
 
             
             # ユーザーの退出処理、ホストの場合はルームの削除
-            if plain_text == "EXIT":
+            if plain_text.decode() == "EXIT":   
                 # ホストのトークンを取得
                 host_token = self.room_host_token.get(room_name)
 
@@ -183,7 +184,8 @@ class Server:
                         for participant in self.chat_room[room_name]:
                             _, user_info = next(iter(participant.items()))
                             receiver = user_info[1]
-                            udp_socket.sendto(user_name_size.to_bytes(1,"big")+(sender_name+close_message).encode(), receiver)
+                            cipher_close_message = self.server_encrypt(self.key[receiver],close_message.encode())
+                            udp_socket.sendto(user_name_size.to_bytes(1,"big")+(sender_name).encode()+cipher_close_message, receiver)
 
                         # ルームデータの削除
                         del self.chat_room[room_name]
@@ -207,7 +209,8 @@ class Server:
                         for participant in self.chat_room[room_name]:
                             _, user_info = next(iter(participant.items()))
                             receiver = user_info[1]
-                            udp_socket.sendto(user_name_size.to_bytes(1,"big")+(sender_name+exit_message).encode(), receiver)
+                            cipher_exit_message = self.server_encrypt(self.key[receiver],exit_message.encode())
+                            udp_socket.sendto(user_name_size.to_bytes(1,"big")+(sender_name).encode()+cipher_exit_message, receiver)
 
                         # ルームにメンバーがいなくなった場合、ルームを削除
                         if len(self.chat_room[room_name]) == 0:
@@ -265,6 +268,18 @@ class Server:
             for user in users_to_delete:
                 del self.user_last_chat_times[user]
             time.sleep(self.timeout_interval)
+
+    def server_encrypt(self,public_key,message):
+        cipher_text = public_key.encrypt(
+            message,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+        
+        return cipher_text
 
 
 if __name__=="__main__":
