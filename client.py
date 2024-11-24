@@ -114,7 +114,8 @@ def send_message(room_name,token,local_port):
 
     available_message_size=packet_size - (token_size + room_name_size)
 
-    threading.Thread(target=receive,daemon=True, args=(udp_socket,)).start()
+    receive_thread = threading.Thread(target=receive, args=(udp_socket,))
+    receive_thread.start()
 
     while True:
         # Enter message
@@ -124,6 +125,15 @@ def send_message(room_name,token,local_port):
             message = input("Too long. Re-Enter message you want to send: ")
             message_size=len(message.encode())
         udp_socket.sendto(room_name_size.to_bytes(1, "big")+token_size.to_bytes(1, "big")+(room_name+token+message).encode(),(server_address,server_port))
+        
+        # 受取スレッドが終了したら終了
+        if(receive_thread.is_alive() == False):
+            break
+        
+        #EXITで退出
+        if(message == "EXIT"):
+            receive_thread.join()
+            break 
 
 def receive(udp_socket):
     packet_size = 4096
@@ -133,6 +143,10 @@ def receive(udp_socket):
         user_name = packet[1:user_name_size+1].decode()
         message = packet[user_name_size+1:].decode()
         print("\n"+user_name+": "+message)
+        
+        #ホストが退出
+        if message == "Room has been closed by the host.":
+            break
 
 def generate_rsa_keys():
 
