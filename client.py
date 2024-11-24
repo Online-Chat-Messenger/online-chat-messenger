@@ -7,7 +7,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 
-class TCPClientSocket:
+class Client:
     def __init__(self):
         self.server_public_key = None
         self.client_public_key,self.client_private_key = self.generate_rsa_keys()
@@ -118,7 +118,8 @@ class TCPClientSocket:
 
         available_message_size=packet_size - (token_size + room_name_size)
 
-        threading.Thread(target=self.receive,daemon=True, args=(udp_socket,)).start()
+        receive_thread = threading.Thread(target=receive, args=(udp_socket,))
+        receive_thread.start()
 
         while True:
             # Enter message
@@ -135,13 +136,22 @@ class TCPClientSocket:
                 )
             )
             
-            # print(cipher_message)
+
             message_size=len(cipher_message)
             while message_size>available_message_size:
                 message = input("Too long. Re-Enter message you want to send: ")
                 message_size=len(cipher_message)
             udp_socket.sendto(room_name_size.to_bytes(1, "big")+token_size.to_bytes(1, "big")+(room_name+token).encode()+cipher_message,(server_address,server_port))
 
+           # 受取スレッドが終了したら終了
+            if(receive_thread.is_alive() == False):
+                break
+
+            #EXITで退出
+            if(message == "EXIT"):
+                receive_thread.join()
+                break 
+            
     def receive(self,udp_socket):
         packet_size = 4096
         while True:
@@ -150,7 +160,7 @@ class TCPClientSocket:
             user_name = packet[1:user_name_size+1].decode()
             message = packet[user_name_size+1:]
             # print(message)
-            plaintext = self.client_private_key.decrypt(
+            plain_text = self.client_private_key.decrypt(
                 message,
                 padding.OAEP(
                     mgf=padding.MGF1(algorithm=hashes.SHA256()),
@@ -158,7 +168,11 @@ class TCPClientSocket:
                     label=None
                 )
             )
-            print("\n"+user_name+": "+plaintext.decode())
+            print("\n"+user_name+": "+plain_text.decode())
+            
+        #ホストが退出
+            if message == "Room has been closed by the host.":
+                break
 
     def generate_rsa_keys(self):
 
@@ -176,6 +190,7 @@ class TCPClientSocket:
         )
 
         return public_key_bytes, private_key
+
 if __name__ == "__main__":
-    TCP_Client = TCPClientSocket()
-    TCP_Client.main()
+    client = Client()
+    client.main()

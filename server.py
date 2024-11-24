@@ -15,6 +15,7 @@ class Server:
         self.chat_room={} #{ room名:[ {参加者のtoken : [user name,user_address]}]}
         self.chat_room_password = {} #{room name : password}
         self.user_host_token = {} #host token : user name
+        self.room_host_token = {}  # {room_name: host_token}  # ここを追加
         self.host_token= 0
         self.address=""
         self.tcp_port =9000
@@ -94,6 +95,7 @@ class Server:
                     self.chat_room[room_name].append({str(self.host_token):[user_name,user_address]})
                     self.user_host_token[str(self.host_token)]= [user_name,user_address]
                     operation_payload = str(self.host_token)
+                    self.room_host_token[room_name] = str(self.host_token)
                     self.host_token+=1
                 operation_payload_size = len(operation_payload.encode())
                 header = state.encode() + operation_payload_size.to_bytes(29,"big")
@@ -149,6 +151,7 @@ class Server:
             body = data[header_size:]
             room_name = body[:room_name_size].decode()
             token = body[room_name_size:room_name_size+token_size].decode()
+
             message = body[room_name_size+token_size:]
             # print(message)
             plain_text = self.server_private_key.decrypt(
@@ -159,7 +162,62 @@ class Server:
                     label=None
                 )
             )
-            # print(plain_text)
+
+
+            
+            # ユーザーの退出処理、ホストの場合はルームの削除
+            if plain_text == "EXIT":
+                # ホストのトークンを取得
+                host_token = self.room_host_token.get(room_name)
+
+                if host_token is None:
+                    # ホストトークンが見つからない場合の処理
+                    print(f"Host token not found for room: {room_name}")
+                else:
+                    if token == host_token:
+                        # ホストが退出する場合
+                        close_message = "Room has been closed by the host."
+                        state = "2"
+                        sender_name = "server"
+                        user_name_size = len(sender_name.encode())
+                        for participant in self.chat_room[room_name]:
+                            _, user_info = next(iter(participant.items()))
+                            receiver = user_info[1]
+                            udp_socket.sendto(user_name_size.to_bytes(1,"big")+(sender_name+close_message).encode(), receiver)
+
+                        # ルームデータの削除
+                        del self.chat_room[room_name]
+                        del self.chat_room_password[room_name]
+                        del self.user_host_token[host_token]
+                        del self.room_host_token[room_name]  # 追加
+                    else:
+                        # 通常ユーザーの退出処理
+                        leaving_user_name = None
+                        for user in self.chat_room[room_name]:
+                            user_token, user_info = next(iter(user.items()))
+                            if user_token == token:
+                                leaving_user_name = user_info[0]
+                                self.chat_room[room_name].remove(user)
+                                break
+
+                        # 他のメンバーに退出通知を送信
+                        exit_message = f"{leaving_user_name} has left the room."
+                        sender_name = "server"
+                        user_name_size = len(sender_name.encode())
+                        for participant in self.chat_room[room_name]:
+                            _, user_info = next(iter(participant.items()))
+                            receiver = user_info[1]
+                            udp_socket.sendto(user_name_size.to_bytes(1,"big")+(sender_name+exit_message).encode(), receiver)
+
+                        # ルームにメンバーがいなくなった場合、ルームを削除
+                        if len(self.chat_room[room_name]) == 0:
+                            del self.chat_room[room_name]
+                            del self.chat_room_password[room_name]
+                            del self.room_host_token[room_name]  # 追加
+
+                continue
+            # ここまでユーザーの退出処理
+
 
             if room_name not in self.chat_room:
                 state = "2"
