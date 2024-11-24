@@ -159,7 +159,7 @@ class Server:
                     label=None
                 )
             )
-            print(plain_text)
+            # print(plain_text)
 
             if room_name not in self.chat_room:
                 state = "2"

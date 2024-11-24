@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives.asymmetric import padding
 
 class TCPClientSocket:
     def __init__(self):
+        self.server_public_key = None
         self.client_public_key,self.client_private_key = self.generate_rsa_keys()
         #public_key_size = len(public_key)
         # print(public_key)
@@ -51,7 +52,7 @@ class TCPClientSocket:
 
                 
                 payload = {"room_name":room_name,"user_name":user_name,"password":password,"public_key":self.client_public_key.decode()}
-                print(payload)
+                # print(payload)
                 operation_payload = json.dumps(payload)
                 operation_payload_size=len(operation_payload.encode())
                 
@@ -122,7 +123,7 @@ class TCPClientSocket:
         while True:
             # Enter message
             message = input("Enter message you want to send: ")
-            print(message)
+            # print(message)
             message = message.encode()
             # encrypt with server_public_key
             cipher_message = self.server_public_key.encrypt(
