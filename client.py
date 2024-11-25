@@ -57,7 +57,7 @@ class Client:
                 payload_size=int.from_bytes(header[1:2],"big")
                 payload = tcp_socket.recv(payload_size).decode()
                 if state =="2":
-                    print(payload)
+                    print(payload+"\n")
                     continue #最初から
                 else:
                     token = payload
@@ -94,22 +94,22 @@ class Client:
                 break
 
     def receive(self,udp_socket):
-        packet_size = 4096
+        buffer_size = 4096
         while True:
-            packet, _ = udp_socket.recvfrom(packet_size)
-            user_name_size = int.from_bytes(packet[:1],"big")
-            user_name = packet[1:user_name_size+1].decode()
-            message = packet[user_name_size+1:]
+            cipher_payload, _ = udp_socket.recvfrom(buffer_size)
             # print(message)
-            plain_text = self.client_private_key.decrypt(
-                message,
+            payload_bytes = self.private_key.decrypt(
+                cipher_payload,
                 padding.OAEP(
                     mgf=padding.MGF1(algorithm=hashes.SHA256()),
                     algorithm=hashes.SHA256(),
                     label=None
                 )
             )
-            print("\n"+user_name+": "+plain_text.decode())
+            payload=json.loads(payload_bytes.decode())
+            sender_name=payload["sender_name"]
+            message=payload["message"]
+            print("\n"+sender_name+": "+message)
 
         #ホストが退出
             if message == "Room has been closed by the host.":
@@ -163,7 +163,7 @@ class Client:
 
 
     def input_info(self):
-        room_name = input("Enter room name you want to create: ")
+        room_name = input("Enter room name: ")
         room_name_size = len(room_name.encode())
         #room name が256バイト以下か確認
         if room_name_size > 2**8:
