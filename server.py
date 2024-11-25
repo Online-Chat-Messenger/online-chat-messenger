@@ -184,6 +184,8 @@ class Server:
                         for participant in self.chat_room[room_name]:
                             _, user_info = next(iter(participant.items()))
                             receiver = user_info[1]
+                            print("receiver: ")
+                            print(receiver)
                             cipher_close_message = self.server_encrypt(self.key[receiver],close_message.encode())
                             udp_socket.sendto(user_name_size.to_bytes(1,"big")+(sender_name).encode()+cipher_close_message, receiver)
 
@@ -207,9 +209,12 @@ class Server:
                         sender_name = "server"
                         user_name_size = len(sender_name.encode())
                         for participant in self.chat_room[room_name]:
+                            print(participant)
                             _, user_info = next(iter(participant.items()))
                             receiver = user_info[1]
                             cipher_exit_message = self.server_encrypt(self.key[receiver],exit_message.encode())
+                            # 他クライアントのみに送られる。
+                            # print(cipher_exit_message)
                             udp_socket.sendto(user_name_size.to_bytes(1,"big")+(sender_name).encode()+cipher_exit_message, receiver)
 
                         # ルームにメンバーがいなくなった場合、ルームを削除
