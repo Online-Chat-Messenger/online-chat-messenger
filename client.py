@@ -13,14 +13,20 @@ class Client:
     def __init__(self):
         self.server_public_key = None
         self.client_public_key,self.client_private_key = self.generate_rsa_keys()
+        self.host_exit_event = threading.Event()
         #public_key_size = len(public_key)
         # print(public_key)
     def main(self):
-        try:
+        try:    
             server_address="localhost"
             server_port=9000
 
+        
+            if self.host_exit_event.is_set():
+                print("Host has exited.")
+                sys._exit()
             while True:
+
                 #TCPでリクエスト送信
                 tcp_socket = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
                 tcp_socket.connect((server_address,server_port))
@@ -102,16 +108,20 @@ class Client:
                 tcp_socket.close()
                 self.send_message(room_name,token,local_port)
 
-        #2でルーム参加
+
+
+
+            #2でルーム参加
         except ChildProcessError:
             pass
 
     def send_message(self,room_name,token,local_port):
+            
         packet_size = 4096
 
         # UDPソケット
-        udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        udp_socket.bind(("",local_port))
+        self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.udp_socket.bind(("",local_port))
         server_address = "localhost"
         server_port = 9001
 
@@ -120,11 +130,18 @@ class Client:
 
         available_message_size=packet_size - (token_size + room_name_size)
 
-        receive_thread = threading.Thread(target=self.receive, args=(udp_socket,))
+
+
+        receive_thread = threading.Thread(target=self.receive)
         receive_thread.start()
-        
+
+        if not self.host_exit_event.is_set():
+            receive_thread.deamon = False
 
         while True:
+            if self.host_exit_event.is_set():
+                print("Host has exited.")
+                break
             # Enter message
             message = input("Enter message you want to send: ")
             # print(message)
@@ -144,44 +161,59 @@ class Client:
             while message_size>available_message_size:
                 message = input("Too long. Re-Enter message you want to send: ")
                 message_size=len(cipher_message)
-            udp_socket.sendto(room_name_size.to_bytes(1, "big")+token_size.to_bytes(1, "big")+(room_name+token).encode()+cipher_message,(server_address,server_port))
+            self.udp_socket.sendto(room_name_size.to_bytes(1, "big")+token_size.to_bytes(1, "big")+(room_name+token).encode()+cipher_message,(server_address,server_port))
 
-           # 受取スレッドが終了したら終了
+            # 受取スレッドが終了したら終了
             if(receive_thread.is_alive() == False):
                 break
 
+
+            
             #EXITで退出
             if(message == "EXIT"):
-                print("EXIT")
+                # print("EXIT")
                 receive_thread.join()
                 # sys._exit()
                 break
+
                 
                 
             
-    def receive(self,udp_socket):
+    def receive(self):
         packet_size = 4096
         while True:
-            # print("receive_thread is on.")
-            packet, _ = udp_socket.recvfrom(packet_size)
-            user_name_size = int.from_bytes(packet[:1],"big")
-            user_name = packet[1:user_name_size+1].decode()
-            message = packet[user_name_size+1:]
-            # cipher_text
-            # print(message)
+            if self.host_exit_event.is_set():
+                print("Host has exited.")
+                break
 
-            plain_text = self.client_private_key.decrypt(
-                message,
-                padding.OAEP(
-                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                    algorithm=hashes.SHA256(),
-                    label=None
+            try:
+                packet, _ = self.udp_socket.recvfrom(packet_size)
+                user_name_size = int.from_bytes(packet[:1],"big")
+                user_name = packet[1:user_name_size+1].decode()
+                message = packet[user_name_size+1:]
+                # cipher_text
+                # print(message)
+
+
+                plain_text = self.client_private_key.decrypt(
+                    message,
+                    padding.OAEP(
+                        mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                        algorithm=hashes.SHA256(),
+                        label=None
+                    )
                 )
-            )
-            print("\n"+user_name+": "+plain_text.decode())
+                print("\n"+user_name+": "+plain_text.decode())
             
-        #ホストが退出
-            if message == "Room has been closed by the host.":
+                #ホストが退出
+                if plain_text == "Room has been closed by the host.":
+                    self.host_exit_event.set()
+                    self.udp_socket.close()
+                    break
+            
+            except ValueError as e:
+                print(f"Decryption error: {e}")
+                # 必要に応じて、エラー発生時の処理を追加
                 break
 
     def generate_rsa_keys(self):
