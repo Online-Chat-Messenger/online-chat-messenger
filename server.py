@@ -40,6 +40,7 @@ class Server:
         while True:
             connection,user_address = tcp_socket.accept()
             threading.Thread(target=self.handle_room, args=(connection, user_address),daemon=True).start()
+        tcp_socket.close()
 
     def handle_room(self,connection,user_address):
         #payload取得
@@ -88,19 +89,21 @@ class Server:
         connection.sendall(server_public_key_size.to_bytes(2,"big")+ self.server_public_key)
 
     def receive_operation(self,connection):
-        header = connection.recv(5)
-        payload_size=int.from_bytes(header,"big")
-        payload = connection.recv(payload_size).decode()
-        payload_json = json.loads(payload)
-        operation = payload_json["operation"]
-        room_name = payload_json["room_name"]
-        user_name = payload_json["user_name"]
-        password  = payload_json["password"]
-        public_key_pem = payload_json["public_key"].encode()
-        public_key = serialization.load_pem_public_key(public_key_pem)
-
-        return operation,room_name,user_name,password,public_key
-
+        try:
+            header = connection.recv(5)
+            payload_size=int.from_bytes(header,"big")
+            payload = connection.recv(payload_size).decode()
+            print(payload)
+            payload_json = json.loads(payload)
+            operation = payload_json["operation"]
+            room_name = payload_json["room_name"]
+            user_name = payload_json["user_name"]
+            password  = payload_json["password"]
+            public_key_pem = payload_json["public_key"].encode()
+            public_key = serialization.load_pem_public_key(public_key_pem)
+            return operation,room_name,user_name,password,public_key
+        except:
+            print("json error")
     # UDPでメッセージの受信、マルチキャスト送信を行う
     def handle_chat(self):
         # UDPソケット
@@ -129,7 +132,16 @@ class Server:
 
             # ユーザーの退出処理、ホストの場合はルームの削除
             if message == "LEAVE":
-                self.remove_host(room_name,token)
+
+                # ホストのトークンを取得
+                host_token = self.room_host_token[room_name]
+                if token == host_token:
+                    self.remove_host(room_name,token)
+                else:
+                    self.remove_participant(room_name,token)
+
+                #最後にチャットした時間を削除
+                del self.user_last_chat_times[address]
                 continue
             # ここまでユーザーの退出処理
 
@@ -144,7 +156,7 @@ class Server:
                     state=SUCCESS
                     receivers = []
                     for participant in self.chat_room[room_name]:
-                        exclude_token, user_info = next(iter(participant.items()))
+                        exclude_token, user_info = next(iter(participant.items())) #イテレータから最初の要素を取得
                         if exclude_token== token:
                             sender_name = user_info[0]
                         else:
@@ -161,7 +173,7 @@ class Server:
                         # 公開鍵で暗号化
                         cipher_payload = self.encrypt(receiver_public_key,payload_bytes)
 
-                        #このままじゃpacket_size超える可能性ある
+                        #state+sender_name<room_name_tokenなのでbuffer_size超えないはず
                         self.udp_socket.sendto(cipher_payload,receiver)
                 else:
                     state = ERROR
@@ -194,67 +206,52 @@ class Server:
                     if user_address == removed_address:  # アドレスが一致するか確認
                         del user[token]
                         self.udp_socket.sendto(ERROR.encode()+error_mes.encode(),removed_address)
-                        print("送信")
 
+    # ホストの退出処理
     def remove_host(self,room_name,token):
-        # ホストのトークンを取得
-        host_token = self.room_host_token[room_name]
+        close_message = "Room has been closed by the host."
+        for participant in self.chat_room[room_name]:
+            user_token, user_info = next(iter(participant.items()))
+            if token==user_token:
+                continue
+            receiver = user_info[1]
+            payload={
+                "state":HOST_CLOSE_ROOM,
+                "message":close_message,
+                "sender_name":"server"
+            }
+            payload_json_bytes=json.dumps(payload).encode()
+            cipher_payload = self.encrypt(self.keys[receiver],payload_json_bytes)
+            self.udp_socket.sendto(cipher_payload, receiver)
 
-        if host_token is None:
-            # ホストトークンが見つからない場合の処理
-            print(f"Host token not found for room: {room_name}")
-        else:
-            if token == host_token:
-                # ホストが退出する場合
-                close_message = "Room has been closed by the host."
-                for participant in self.chat_room[room_name]:
+        # ルームデータの削除
+        del self.chat_room[room_name]
+        del self.chat_room_password[room_name]
+        del self.room_host_token[room_name]
 
-                    user_token, user_info = next(iter(participant.items()))
-                    if token==user_token:
-                        continue
-                    receiver = user_info[1]
-                    payload={
-                        "state":HOST_CLOSE_ROOM,
-                        "message":close_message,
-                        "sender_name":"server"
-                    }
-                    payload_json_bytes=json.dumps(payload).encode()
-                    cipher_payload = self.encrypt(self.keys[receiver],payload_json_bytes)
-                    self.udp_socket.sendto(cipher_payload, receiver)
+    # 参加者の退出処理
+    def remove_participant(self,room_name,token):
+        leaving_user_name = None
+        for user in self.chat_room[room_name]:
+            user_token, user_info = next(iter(user.items()))
+            if user_token == token:
+                leaving_user_name = user_info[0]
+                self.chat_room[room_name].remove(user)
+                break
 
-                # ルームデータの削除
-                del self.chat_room[room_name]
-                del self.chat_room_password[room_name]
-                del self.room_host_token[room_name]
-
-            else:
-                # 通常ユーザーの退出処理
-                leaving_user_name = None
-                for user in self.chat_room[room_name]:
-                    user_token, user_info = next(iter(user.items()))
-                    if user_token == token:
-                        leaving_user_name = user_info[0]
-                        self.chat_room[room_name].remove(user)
-                        break
-
-                # 他のメンバーに退出通知を送信
-                exit_message = f"{leaving_user_name} has left the room."
-                for participant in self.chat_room[room_name]:
-                    _, user_info = next(iter(participant.items()))
-                    receiver = user_info[1]
-                    payload={
-                        "state":LEAVE,
-                        "message":exit_message,
-                        "sender_name":"server"
-                    }
-                    payload_json_bytes=json.dumps(payload).encode()
-                    cipher_payload = self.encrypt(self.keys[receiver],payload_json_bytes)
-                    self.udp_socket.sendto(cipher_payload, receiver)
-                # ルームにメンバーがいなくなった場合、ルームを削除
-                if len(self.chat_room[room_name]) == 0:
-                    del self.chat_room[room_name]
-                    del self.chat_room_password[room_name]
-                    del self.room_host_token[room_name]
+        # 他のメンバーに退出通知を送信
+        exit_message = f"{leaving_user_name} has left the room."
+        for participant in self.chat_room[room_name]:
+            _, user_info = next(iter(participant.items()))
+            receiver = user_info[1]
+            payload={
+                "state":LEAVE,
+                "message":exit_message,
+                "sender_name":"server"
+            }
+            payload_json_bytes=json.dumps(payload).encode()
+            cipher_payload = self.encrypt(self.keys[receiver],payload_json_bytes)
+            self.udp_socket.sendto(cipher_payload, receiver)
 
     def encrypt(self,public_key,message):
         cipher_text = public_key.encrypt(

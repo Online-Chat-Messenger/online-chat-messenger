@@ -59,7 +59,7 @@ class Client:
                 payload_size=int.from_bytes(header[1:2],"big")
                 payload = tcp_socket.recv(payload_size).decode()
                 if state =="2":
-                    print(payload+"\n")
+                    print("\n"+payload)
                     continue #最初から
                 else:
                     token = payload
@@ -86,12 +86,14 @@ class Client:
             #Enter message
             cipher_payload,exit_flag = self.input_message(token,room_name)
             #Return cipher_payload comprised of cipher_message,room name,token
-            udp_socket.sendto(cipher_payload,(self.server_address,self.server_udp_port))
 
-            # 受取スレッドが終了したら終了
+            # receiveスレッドが終了したら終了
             if(receive_thread.is_alive() == False):
                 break
-            #EXITで退出
+
+            udp_socket.sendto(cipher_payload,(self.server_address,self.server_udp_port))
+
+            #LEAVEで退出
             if(exit_flag):
                 break
 
@@ -116,11 +118,14 @@ class Client:
             #ホストが退出
             if state == HOST_CLOSE_ROOM:
                 print("\n------"+message)
+                print("Click Enter")
                 break
             elif state== LEAVE:
                 print("\n------"+message)
             else:
                 print("\n"+sender_name+": "+message)
+            print("Enter message you want to send (Type 'LEAVE' to exit the room.) : ")
+
 
     def input_message(self,token,room_name):
         packet_size = 4096
@@ -179,8 +184,16 @@ class Client:
             room_name = input("Re-enter room name: ")
             room_name_size = len(room_name.encode())
         user_name = input("Enter your user name: ")
+        user_name_size = len(user_name.encode())
+        #user name が256バイト以下か確認
+        if user_name_size > 2**8:
+            print("User name must not be over 256 bytes")
+            print("FYI: This user name has "+ user_name_size + "bytes")
+            user_name = input("Re-enter user name: ")
+            user_name_size = len(user_name.encode())
         password = input("Enter password for room: ")
         return room_name,user_name,password
+
 
     def input_operation(self):
         print("\nWhich operation do you want to do")
