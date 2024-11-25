@@ -2,6 +2,8 @@ import socket
 import threading
 import json
 import base64
+import os
+import sys
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives import hashes
@@ -14,7 +16,7 @@ class Client:
         #public_key_size = len(public_key)
         # print(public_key)
     def main(self):
-        # try:
+        try:
             server_address="localhost"
             server_port=9000
 
@@ -100,9 +102,9 @@ class Client:
                 tcp_socket.close()
                 self.send_message(room_name,token,local_port)
 
-        # #2でルーム参加
-        # except ChildProcessError:
-        #     pass
+        #2でルーム参加
+        except ChildProcessError:
+            pass
 
     def send_message(self,room_name,token,local_port):
         packet_size = 4096
@@ -126,10 +128,10 @@ class Client:
             # Enter message
             message = input("Enter message you want to send: ")
             # print(message)
-            message = message.encode()
+            binary_message = message.encode()
             # encrypt with server_public_key
             cipher_message = self.server_public_key.encrypt(
-                message,
+                binary_message,
                 padding.OAEP(
                     mgf=padding.MGF1(algorithm=hashes.SHA256()),
                     algorithm=hashes.SHA256(),
@@ -150,20 +152,24 @@ class Client:
 
             #EXITで退出
             if(message == "EXIT"):
-                # join()はreceive_threadを終わらせる？
+                print("EXIT")
                 receive_thread.join()
-                break 
+                # sys._exit()
+                break
+                
                 
             
     def receive(self,udp_socket):
         packet_size = 4096
         while True:
+            # print("receive_thread is on.")
             packet, _ = udp_socket.recvfrom(packet_size)
             user_name_size = int.from_bytes(packet[:1],"big")
             user_name = packet[1:user_name_size+1].decode()
             message = packet[user_name_size+1:]
             # cipher_text
             # print(message)
+
             plain_text = self.client_private_key.decrypt(
                 message,
                 padding.OAEP(
