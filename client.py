@@ -1,3 +1,4 @@
+import os
 import socket
 import threading
 import json
@@ -14,6 +15,8 @@ SUCCESS="1"
 ERROR="2"
 HOST_CLOSE_ROOM="3"
 LEAVE="4"
+TIMEOUT="5"
+
 class Client:
     def __init__(self,server_address,server_tcp_port,server_udp_port,public_key,private_key):
         self.server_address=server_address
@@ -79,7 +82,7 @@ class Client:
         udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         udp_socket.bind(("",local_port))
 
-        receive_thread = threading.Thread(target=self.receive, args=(udp_socket,),daemon=True)
+        receive_thread = threading.Thread(target=self.receive, args=(udp_socket,token),daemon=True)
         receive_thread.start()
 
         while True:
@@ -97,7 +100,7 @@ class Client:
             if(exit_flag):
                 break
 
-    def receive(self,udp_socket):
+    def receive(self,udp_socket,token):
         buffer_size = 4096
         while True:
             cipher_payload, _ = udp_socket.recvfrom(buffer_size)
@@ -117,11 +120,21 @@ class Client:
 
             #ホストが退出
             if state == HOST_CLOSE_ROOM:
-                print("\n------"+message)
+                print("\n------"+message+"------")
                 print("Click Enter")
                 break
             elif state== LEAVE:
-                print("\n------"+message)
+                print("\n------"+message+"------")
+            elif state ==TIMEOUT:
+                if payload["token"] == token:
+                    print("\n-------You have been inactive for a long time. Terminate a program...")
+                    os._exit(0)
+                elif payload["this is host"]:
+                    print("\n------"+message+"------")
+                    print("Click Enter")
+                    break
+                else:
+                    print("\n------"+message+"------")
             else:
                 print("\n"+sender_name+": "+message)
             print("Enter message you want to send (Type 'LEAVE' to exit the room.) : ")

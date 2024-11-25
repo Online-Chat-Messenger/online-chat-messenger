@@ -13,8 +13,11 @@ JOIN ="2"
 
 SUCCESS="1"
 ERROR="2"
+
 HOST_CLOSE_ROOM="3"
 LEAVE="4"
+TIMEOUT="5"
+
 class Server:
     def __init__(self,server_address,tcp_port,udp_port,server_private_key,server_public_key):
         self.address=server_address
@@ -27,9 +30,9 @@ class Server:
         self.chat_room_password = {} #{room name : password}
         self.room_host_token = {}  # {room_name: host_token}
         self.host_token= 0   #host token
-        self.token = 1000 #user token
-        self.user_last_chat_times={} #{user address:last time}
-        self.timeout_interval = 5 #秒数
+        self.token = 100000 #user token
+        self.user_last_active_times={} #{user address:last time}
+        self.timeout_interval = 10 #秒数
         self.keys={} # {user_address:user_public_key}
 
     #TCP接続でルーム作成、参加を扱う
@@ -39,8 +42,8 @@ class Server:
         tcp_socket.listen()
         while True:
             connection,user_address = tcp_socket.accept()
+            self.user_last_active_times[user_address]=time.time()
             threading.Thread(target=self.handle_room, args=(connection, user_address),daemon=True).start()
-        tcp_socket.close()
 
     def handle_room(self,connection,user_address):
         #payload取得
@@ -93,7 +96,6 @@ class Server:
             header = connection.recv(5)
             payload_size=int.from_bytes(header,"big")
             payload = connection.recv(payload_size).decode()
-            print(payload)
             payload_json = json.loads(payload)
             operation = payload_json["operation"]
             room_name = payload_json["room_name"]
@@ -102,14 +104,14 @@ class Server:
             public_key_pem = payload_json["public_key"].encode()
             public_key = serialization.load_pem_public_key(public_key_pem)
             return operation,room_name,user_name,password,public_key
-        except:
-            print("json error")
-    # UDPでメッセージの受信、マルチキャスト送信を行う
+        except json.JSONDecodeError:
+            pass
+        # UDPでメッセージの受信、マルチキャスト送信を行う
     def handle_chat(self):
         # UDPソケット
         self.udp_socket =socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.udp_socket.bind((self.address, self.udp_port))
-        #threading.Thread(target=self.check_time, daemon=True).start()
+        threading.Thread(target=self.check_time, daemon=True).start()
         buffer_size = 4096
 
         while True:
@@ -128,22 +130,19 @@ class Server:
             room_name = data["room_name"]
             token = data["token"]
             message = data["message"]
-            self.user_last_chat_times[address]=time.time()
+            self.user_last_active_times[address]=time.time()
 
             # ユーザーの退出処理、ホストの場合はルームの削除
             if message == "LEAVE":
-
                 # ホストのトークンを取得
                 host_token = self.room_host_token[room_name]
                 if token == host_token:
                     self.remove_host(room_name,token)
                 else:
                     self.remove_participant(room_name,token)
-
                 #最後にチャットした時間を削除
-                del self.user_last_chat_times[address]
+                del self.user_last_active_times[address]
                 continue
-            # ここまでユーザーの退出処理
 
             if room_name not in self.chat_room:
                 state = ERROR
@@ -162,7 +161,6 @@ class Server:
                         else:
                             receivers.append(user_info[1])
                     for receiver in receivers:
-                        # self.keysから公開鍵を入手
                         receiver_public_key = self.keys[receiver]
                         payload = {
                             "state":SUCCESS,
@@ -170,7 +168,6 @@ class Server:
                             "sender_name":sender_name,
                         }
                         payload_bytes = json.dumps(payload).encode()
-                        # 公開鍵で暗号化
                         cipher_payload = self.encrypt(receiver_public_key,payload_bytes)
 
                         #state+sender_name<room_name_tokenなのでbuffer_size超えないはず
@@ -181,45 +178,59 @@ class Server:
                     self.udp_socket.sendto(state.encode()+operation_payload.encode(),address)
 
     def check_time(self):
-        print("なう")
         while True:
             users_to_delete = []
             current_time = time.time()
-            for user_address, last_send_time in self.user_last_chat_times.items():
-                print(current_time,last_send_time)
+            for user_address, last_send_time in self.user_last_active_times.items():
                 if current_time - last_send_time >= self.timeout_interval:
                     users_to_delete.append(user_address)
             for user_address in users_to_delete:
                 self.remove_user_by_address(user_address)
-                #そのユーザーがホストならルームもパスワードもけす
             time.sleep(self.timeout_interval)
 
-
     def remove_user_by_address(self, removed_address):
-        del self.user_last_chat_times[removed_address]
-        del self.keys[removed_address]
-        error_mes = "You have been removed from the room because of timeout. Join again"
-        for _, user_list in self.chat_room.items():
-            # 各トークンとそのデータを確認
-            for user in user_list:
-                for token, user_address in user.items():
-                    if user_address == removed_address:  # アドレスが一致するか確認
-                        del user[token]
-                        self.udp_socket.sendto(ERROR.encode()+error_mes.encode(),removed_address)
+        room_name,token=self.find_room_and_token_by_address(removed_address)
+        if room_name in self.room_host_token:
+            host_token = self.room_host_token[room_name]
+            if token == host_token:
+                self.remove_host(room_name,token,isTimeout=True)
+            else:
+                self.remove_participant(room_name,token,isTimeout=True)
+            del self.user_last_active_times[removed_address]
+            del self.keys[removed_address]
+
+    def find_room_and_token_by_address(self, address):
+        for room_name, participants in self.chat_room.items():  # すべてのルームを確認
+            for user in participants:  # そのルーム内の参加者リストを確認
+                for token, user_info in user.items():  # 各参加者のトークンと情報を取得
+                    if user_info[1] == address:  # アドレスが一致する場合
+                        return room_name, token  # ルーム名とトークンを返す
+        return None, None  # 見つからない場合
 
     # ホストの退出処理
-    def remove_host(self,room_name,token):
-        close_message = "Room has been closed by the host."
+    def remove_host(self,room_name,token,isTimeout=False):
+        if isTimeout:
+                close_message = "The room has been closed because the host was inactive for a long time."
+                payload={
+                    "state":TIMEOUT,
+                    "message":close_message,
+                    "sender_name":"server",
+                    "token":token,
+                    "this is host" : True
+                }
+        else:
+            close_message = "Room has been closed by the host."
+            payload={
+                    "state":HOST_CLOSE_ROOM,
+                    "message":close_message,
+                    "sender_name":"server"
+                }
+
         for participant in self.chat_room[room_name]:
             user_token, user_info = next(iter(participant.items()))
-            if token==user_token:
+            if token==user_token and not isTimeout:
                 continue
             receiver = user_info[1]
-            payload={
-                "state":HOST_CLOSE_ROOM,
-                "message":close_message,
-                "sender_name":"server"
-            }
             payload_json_bytes=json.dumps(payload).encode()
             cipher_payload = self.encrypt(self.keys[receiver],payload_json_bytes)
             self.udp_socket.sendto(cipher_payload, receiver)
@@ -230,28 +241,45 @@ class Server:
         del self.room_host_token[room_name]
 
     # 参加者の退出処理
-    def remove_participant(self,room_name,token):
+    def remove_participant(self,room_name,token,isTimeout=False):
         leaving_user_name = None
         for user in self.chat_room[room_name]:
             user_token, user_info = next(iter(user.items()))
             if user_token == token:
                 leaving_user_name = user_info[0]
+                address=user_info[1]
                 self.chat_room[room_name].remove(user)
                 break
 
-        # 他のメンバーに退出通知を送信
-        exit_message = f"{leaving_user_name} has left the room."
-        for participant in self.chat_room[room_name]:
-            _, user_info = next(iter(participant.items()))
-            receiver = user_info[1]
+        if isTimeout:
+            exit_message = f"{leaving_user_name} has left the room because of timeout."
+            payload={
+                "state":TIMEOUT,
+                "message":exit_message,
+                "sender_name":"server",
+                "token":token,
+                "this is host" : False
+            }
+        else:
+            exit_message = f"{leaving_user_name} has left the room."
             payload={
                 "state":LEAVE,
                 "message":exit_message,
                 "sender_name":"server"
             }
+        # 他のメンバーに退出通知を送信
+        for participant in self.chat_room[room_name]:
+            _, user_info = next(iter(participant.items()))
+            receiver = user_info[1]
+
             payload_json_bytes=json.dumps(payload).encode()
             cipher_payload = self.encrypt(self.keys[receiver],payload_json_bytes)
             self.udp_socket.sendto(cipher_payload, receiver)
+        #タイムアウトならその人自身にも知らせる
+        if isTimeout:
+            payload_json_bytes=json.dumps(payload).encode()
+            cipher_payload = self.encrypt(self.keys[address],payload_json_bytes)
+            self.udp_socket.sendto(cipher_payload, address)
 
     def encrypt(self,public_key,message):
         cipher_text = public_key.encrypt(
@@ -264,6 +292,7 @@ class Server:
         )
 
         return cipher_text
+
 def generate_rsa_keys():
     private_key = rsa.generate_private_key(
         public_exponent=65537,
