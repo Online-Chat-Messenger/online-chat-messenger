@@ -10,9 +10,10 @@ import sys
 CREATE ="1"
 JOIN ="2"
 
-ERROR="2"
 SUCCESS="1"
-
+ERROR="2"
+HOST_CLOSE_ROOM="3"
+LEAVE="4"
 class Client:
     def __init__(self,server_address,server_tcp_port,server_udp_port,public_key,private_key):
         self.server_address=server_address
@@ -47,9 +48,10 @@ class Client:
                 payload = tcp_socket.recv(payload_size).decode()
                 if state ==SUCCESS:
                     token = payload
-                    print("successfully created")
+                    print("\nsuccessfully created\n")
                 elif state ==ERROR:
-                    print(payload)
+                    print("\n"+payload)
+                    continue
 
             elif operation == JOIN:
                 header = tcp_socket.recv(2)
@@ -61,6 +63,7 @@ class Client:
                     continue #最初から
                 else:
                     token = payload
+                    print("\nsuccessfully joined\n")
 
             server_public_key_size = int.from_bytes(tcp_socket.recv(2),"big")
             server_public_key_pem = tcp_socket.recv(server_public_key_size)
@@ -90,7 +93,6 @@ class Client:
                 break
             #EXITで退出
             if(exit_flag):
-                receive_thread.join()
                 break
 
     def receive(self,udp_socket):
@@ -107,13 +109,18 @@ class Client:
                 )
             )
             payload=json.loads(payload_bytes.decode())
+            state=payload["state"]
             sender_name=payload["sender_name"]
             message=payload["message"]
-            print("\n"+sender_name+": "+message)
 
-        #ホストが退出
-            if message == "Room has been closed by the host.":
+            #ホストが退出
+            if state == HOST_CLOSE_ROOM:
+                print("\n------"+message)
                 break
+            elif state== LEAVE:
+                print("\n------"+message)
+            else:
+                print("\n"+sender_name+": "+message)
 
     def input_message(self,token,room_name):
         packet_size = 4096
@@ -121,7 +128,7 @@ class Client:
         token_size = len(token.encode())
         available_message_size=packet_size - (token_size + room_name_size)
 
-        message=input("Enter message you want to send: ")
+        message=input("Enter message you want to send (Type 'LEAVE' to exit the room.) :  ")
 
         payload={
                 "message":message,
@@ -156,7 +163,7 @@ class Client:
                 )
             )
             payload_size=len(cipher_payload)
-        if message == "EXIT":
+        if message == "LEAVE":
             return cipher_payload,True
         else:
             return cipher_payload,False
@@ -176,7 +183,7 @@ class Client:
         return room_name,user_name,password
 
     def input_operation(self):
-        print("Which operation do you want to do")
+        print("\nWhich operation do you want to do")
         print("1: Create a chat room")
         print("2: Join a chat room")
         print("3: exit")
