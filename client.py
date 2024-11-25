@@ -1,11 +1,20 @@
 import socket
 import threading
 import json
-import base64
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
+import sys
+
+CREATE ="1"
+JOIN ="2"
+
+ERROR="2"
+SUCCESS="1"
+
+# 終了フラグを共有
+exit_flag= False
 
 class Client:
     def __init__(self):
@@ -13,7 +22,7 @@ class Client:
         self.client_public_key,self.client_private_key = self.generate_rsa_keys()
         #public_key_size = len(public_key)
         # print(public_key)
-    def main(self):
+    def run(self):
         try:
             server_address="localhost"
             server_port=9000
@@ -48,27 +57,27 @@ class Client:
                 password = input("Enter password: ")
                 state="0"
                 #operation_payload=user_name
-                
 
-                
+
+
                 payload = {"room_name":room_name,"user_name":user_name,"password":password,"public_key":self.client_public_key.decode()}
                 # print(payload)
                 operation_payload = json.dumps(payload)
                 operation_payload_size=len(operation_payload.encode())
-                
+
                 #header = room_name_size.to_bytes(1,"big") + operation.encode() + state.encode() + operation_payload_size.to_bytes(29,"big")
-                
+
                 header_content = {
                     "operation":operation,
                     "state":state,
                     "operation_payload_size":operation_payload_size
                 }
-                
+
                 header_json = json.dumps(header_content).encode()
-                
+
                 header_size = len(header_json)
                 header = header_size.to_bytes(1,"big") + header_json
-                
+
                 tcp_socket.sendall(header)
                 tcp_socket.sendall(operation_payload.encode())
 
@@ -121,6 +130,7 @@ class Client:
         receive_thread = threading.Thread(target=self.receive, args=(udp_socket,))
         receive_thread.start()
 
+
         while True:
             # Enter message
             message = input("Enter message you want to send: ")
@@ -135,7 +145,7 @@ class Client:
                     label=None
                 )
             )
-            
+
 
             message_size=len(cipher_message)
             while message_size>available_message_size:
@@ -146,12 +156,11 @@ class Client:
            # 受取スレッドが終了したら終了
             if(receive_thread.is_alive() == False):
                 break
-
             #EXITで退出
             if(message == "EXIT"):
                 receive_thread.join()
-                break 
-            
+                break
+
     def receive(self,udp_socket):
         packet_size = 4096
         while True:
@@ -169,7 +178,7 @@ class Client:
                 )
             )
             print("\n"+user_name+": "+plain_text.decode())
-            
+
         #ホストが退出
             if message == "Room has been closed by the host.":
                 break
@@ -193,4 +202,4 @@ class Client:
 
 if __name__ == "__main__":
     client = Client()
-    client.main()
+    client.run()

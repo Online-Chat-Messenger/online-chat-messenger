@@ -8,22 +8,26 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.backends import default_backend
 
+CREATE ="1"
+JOIN ="2"
 
+SUCCESS="1"
+ERROR="2"
 
 class Server:
     def __init__(self):
         self.chat_room={} #{ room名:[ {参加者のtoken : [user name,user_address]}]}
         self.chat_room_password = {} #{room name : password}
-        self.user_host_token = {} #host token : user name
+        self.user_host_token = {} #{host token : user name}
         self.room_host_token = {}  # {room_name: host_token}  # ここを追加
-        self.host_token= 0
-        self.address=""
+        self.host_token= 0   #token
+        self.address="" #すべてのインターフェース
         self.tcp_port =9000
         self.udp_port=9001
         self.token = 1000
-        self.user_last_chat_times={}
+        self.user_last_chat_times={} #{user address:last time}
         self.buffer_size = 4096
-        self.timeout_interval = 600 #秒数
+        self.timeout_interval = 30 #秒数
         self.server_public_key, self.server_private_key = self.generate_rsa_keys()
         self.key={}
 
@@ -32,7 +36,6 @@ class Server:
         threading.Thread(target = self.handle_chat).start()
 
     def generate_rsa_keys(self):
-
         private_key = rsa.generate_private_key(
             public_exponent=65537,
             key_size=2048,
@@ -54,23 +57,12 @@ class Server:
         tcp_socket.listen()
         while True:
             connection,user_address = tcp_socket.accept()
-            #header
-            #header = connection.recv(32)
             header_size = connection.recv(1)
-            print(header_size)
             header = connection.recv(int.from_bytes(header_size,"big"))
-            print(header.decode())
             header = json.loads(header.decode())
             operation = header["operation"]
-            state = header["state"]
             operation_payload_size = header["operation_payload_size"]
-            #room_name_size = int.from_bytes(header[:1],"big")
-            #operation = header[1:2].decode()
-            #state = header[2:3].decode()
-            #public_key_size = int.from_bytes(header[3:8],"big")
-            #operation_payload_size = int.from_bytes(header[3:],"big")
             body = connection.recv(operation_payload_size)
-            #public_key = body[room_name_size:room_name_size+public_key_size]
             operation_payload = body.decode()
             payload_data = json.loads(operation_payload)
             room_name = payload_data["room_name"]
@@ -78,18 +70,15 @@ class Server:
             public_key = serialization.load_pem_public_key(public_key)
             self.key[user_address]=public_key
             password = payload_data["password"]
-            #print("operation", operation)
-            print("room name",room_name)
-            #print("payload",payload_data)
 
-            if operation == "1":
+            if operation ==  CREATE:
                 user_name = payload_data["user_name"]
                 if room_name  in self.chat_room:
-                    state =  "2"
+                    state =  ERROR
                     operation_payload = "This room name is already used. Use another one."
                     operation_payload_size=len(operation_payload.encode())
                 else:
-                    state = "1"
+                    state = SUCCESS
                     self.chat_room[room_name] = []
                     self.chat_room_password[room_name] = password
                     self.chat_room[room_name].append({str(self.host_token):[user_name,user_address]})
@@ -98,35 +87,30 @@ class Server:
                     self.room_host_token[room_name] = str(self.host_token)
                     self.host_token+=1
                 operation_payload_size = len(operation_payload.encode())
-                header = state.encode() + operation_payload_size.to_bytes(29,"big")
+                header = state.encode() + operation_payload_size.to_bytes(5,"big")
                 connection.sendall(header)
                 connection.sendall(operation_payload.encode())
-                print(self.chat_room)
 
-            elif operation=="2":
+            elif operation==JOIN:
                 #passwordが合っている場合
                 user_name = payload_data["user_name"]
-                print("追加前",self.chat_room)
                 if room_name not in self.chat_room:
-                    state ="2"
+                    state =ERROR
                     operation_payload = "This room does not exist."
                 elif password != self.chat_room_password[room_name]:
-                    state = "2"
+                    state = ERROR
                     operation_payload = "Password is incorrect."
                 else:
-                    state = "1"
+                    state = SUCCESS
                     self.chat_room[room_name].append({str(self.token):[user_name,user_address]})
                     operation_payload = str(self.token)
                     self.token+=1
                 operation_payload_size = len(operation_payload.encode())
-                header = state.encode() + operation_payload_size.to_bytes(29,"big")
+                header = state.encode() + operation_payload_size.to_bytes(5,"big")
                 connection.sendall(header)
                 connection.sendall(operation_payload.encode())
-                print("追加後",self.chat_room)   
 
-            
             connection.sendall(self.server_public_key)
-
 
     # UDPでメッセージの受信、マルチキャスト送信を行う
     def handle_chat(self):
@@ -140,7 +124,7 @@ class Server:
 
         print('\nwaiting to receive message')
 
-        threading.Thread(target=self.check_time, daemon=True).start()
+        threading.Thread(target=self.check_time,args=(udp_socket,), daemon=True).start()
 
         while True:
             # メッセージの受信
@@ -151,7 +135,6 @@ class Server:
             body = data[header_size:]
             room_name = body[:room_name_size].decode()
             token = body[room_name_size:room_name_size+token_size].decode()
-
             message = body[room_name_size+token_size:]
             # print(message)
             plain_text = self.server_private_key.decrypt(
@@ -162,12 +145,9 @@ class Server:
                     label=None
                 )
             )
-
-            
-
-            
+            self.user_last_chat_times[address]=time.time()
             # ユーザーの退出処理、ホストの場合はルームの削除
-            if plain_text.decode() == "EXIT":   
+            if plain_text.decode() == "EXIT":
                 # ホストのトークンを取得
                 host_token = self.room_host_token.get(room_name)
 
@@ -221,15 +201,15 @@ class Server:
                 continue
             # ここまでユーザーの退出処理
 
-
             if room_name not in self.chat_room:
-                state = "2"
-                udp_socket.sendto(state.encode(),address)
+                state = ERROR
+                operation_payload="This room has been deleted"
+                udp_socket.sendto(state.encode()+operation_payload.encode(),address)
             else:
                 self.chat_room[room_name]
                 token_found = any(token in user for user in self.chat_room[room_name])
                 if token_found:
-                    state="1"
+                    state=SUCCESS
                     print("message",plain_text)
                     receivers = []
                     for participant in self.chat_room[room_name]:
@@ -254,19 +234,21 @@ class Server:
                         user_name_size = len(sender_name.encode())
                         udp_socket.sendto(user_name_size.to_bytes(1,"big")+(sender_name).encode()+cipher_text,receiver)
                 else:
-                    state = "2"
-                    mes ="You don't have proper token probably because of timeout. First participate in the room."
-                    udp_socket.sendto(state.encode(),address)
+                    state = ERROR
+                    operation_payload ="You don't have proper token probably because of timeout. First participate in the room."
+                    udp_socket.sendto(state.encode()+operation_payload.encode(),address)
 
-    def check_time(self):
+    def check_time(self,udp_socket):
         while True:
             users_to_delete = []
             current_time = time.time()
-            for user, last_send_time in self.user_last_chat_times.items():
+            for user_address, last_send_time in self.user_last_chat_times.items():
                 if current_time - last_send_time >= self.timeout_interval:
-                    users_to_delete.append(user)
-            for user in users_to_delete:
-                del self.user_last_chat_times[user]
+                    users_to_delete.append(user_address)
+            for user_address in users_to_delete:
+                self.remove_user_by_address(user_address,udp_socket)
+                #そのユーザーがホストならルームもパスワードもけす
+                #if
             time.sleep(self.timeout_interval)
 
     def server_encrypt(self,public_key,message):
@@ -278,9 +260,19 @@ class Server:
                 label=None
             )
         )
-        
+
         return cipher_text
 
+    def remove_user_by_address(self, removed_address,udp_socket):
+        del self.user_last_chat_times[removed_address]
+        del self.key[removed_address]
+        error_mes = "You have been removed from the room because of timeout."
+        for _, user_list in self.chat_room.items():
+            # 各トークンとそのデータを確認
+            for token, user_address in user_list.items():
+                if user_address == removed_address:  # アドレスが一致するか確認
+                    del user_list[token]
+                    udp_socket.sendto(ERROR.encode()+error_mes.encode(),removed_address)
 
 if __name__=="__main__":
     server = Server()
