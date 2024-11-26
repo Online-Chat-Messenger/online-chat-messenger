@@ -29,12 +29,10 @@ pip install cryptography
 # 使い方
 
 - サーバを先に起動します、
-- 
 ```bash
 python server.py
 ```
 - その後クライアントを実行し、CREATE(1),JOIN(2),EXIT(3)のいずれかを選びます。
-- 
 ```bash
 python client.py
 ```
