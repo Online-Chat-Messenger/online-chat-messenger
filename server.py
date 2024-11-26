@@ -32,7 +32,7 @@ class Server:
         self.host_token= 0   #host token
         self.token = 100000 #user token
         self.user_last_active_times={} #{user address:last time}
-        self.timeout_interval = 10 #秒数
+        self.timeout_interval = 3600 #秒数
         self.keys={} # {user_address:user_public_key}
 
     #TCP接続でルーム作成、参加を扱う
