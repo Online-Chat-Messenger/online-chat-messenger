@@ -10,7 +10,7 @@
 
 1. レポジトリをクローンします。
 1. 以下コードを順番に実行します。
-    1.```pip install cryptography```
+    1.　```pip install cryptography```
     1. ```cd online-chat-messenger```
     1. ```python server.py```
     1. ```python client.py```
