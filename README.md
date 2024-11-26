@@ -1,4 +1,4 @@
-#　プロジェクト名
+# プロジェクト名
 
 online-chat-messenger
 
